@@ -60,6 +60,21 @@ export async function analyzeImage(file: File, fieldId?: string) {
 }
 
 /**
+ * Trigger analysis for an existing drone-ingested scan.
+ */
+export async function analyzeExistingScan(scanId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE_URL}/analyze/scan/${scanId}`, {
+      method: 'POST',
+      headers: headers,
+    });
+    if (!response.ok) {
+      throw new Error('Analysis of existing scan failed');
+    }
+    return response.json();
+}
+
+/**
  * Fetch all registered fields for the logged in user.
  */
 export async function getFields(userId: string) {
@@ -132,6 +147,18 @@ export function getComparisonReportUrl(prevId: string, currId: string, token: st
     return `${API_BASE_URL}/api/report/compare/${prevId}/${currId}?token=${token}`;
 }
 
+/**
+ * Fetch overall dashboard statistics for the logged in user.
+ */
+export async function getDashboardStats(userId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE_URL}/api/stats?user_id=${userId}`, {
+      headers,
+    });
+    if (!response.ok) throw new Error('Failed to fetch stats');
+    return response.json();
+}
+
 export const cropSightApi = {
   analyzeImage,
   getFields,
@@ -139,5 +166,8 @@ export const cropSightApi = {
   getHistoricalScans,
   compareScans,
   getReportUrl,
-  getComparisonReportUrl
+  getComparisonReportUrl,
+  getDashboardStats,
+  analyzeExistingScan
 };
+

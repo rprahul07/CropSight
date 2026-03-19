@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
-import { Sprout, LayoutDashboard, Upload, History, LogOut, Menu, X } from "lucide-react";
+import { Sprout, LayoutDashboard, Upload, History, LogOut, Menu, X, Router } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
+  { label: "Drone Feed", icon: Router, path: "/dashboard/drone" },
   { label: "Upload", icon: Upload, path: "/dashboard/upload" },
   { label: "History", icon: History, path: "/dashboard/history" },
 ];

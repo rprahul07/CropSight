@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { History, Clock, ArrowRightLeft, Sprout } from "lucide-react";
-import { motion } from "framer-motion";
+import { History, Clock, ArrowRightLeft, Sprout, RefreshCw } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { cropSightApi } from "../services/api";
 import { supabase } from "@/lib/supabase";
@@ -17,6 +17,7 @@ type Scan = {
   healthy_pct: number;
   image_url?: string;
   overlay_url?: string;
+  status?: string;
 };
 
 const HistoryPage = () => {
@@ -132,22 +133,38 @@ const HistoryPage = () => {
         </div>
       ) : null}
 
-      <div className="space-y-3 mt-8">
-        <h2 className="text-lg font-semibold mt-8 mb-4">Chronological History</h2>
-        {isLoading && <p className="text-sm text-muted-foreground">Loading history from database...</p>}
+      <div className="space-y-4 pt-4">
+        <h2 className="text-xl font-bold text-foreground">Chronological History</h2>
+        
+        {isLoading && (
+          <div className="flex items-center gap-3 p-6 bg-muted/30 rounded-2xl border border-dashed border-border">
+            <RefreshCw className="w-5 h-5 text-primary animate-spin" />
+            <p className="text-sm text-muted-foreground font-medium">Fetching history...</p>
+          </div>
+        )}
         
         {!isLoading && history.length === 0 && (
-          <p className="text-sm text-muted-foreground">No historical scans found. Upload an image above to start tracking!</p>
+          <div className="text-center p-12 bg-muted/20 rounded-2xl border border-dashed border-border">
+             <History className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+             <p className="text-sm text-muted-foreground">No historical scans found yet.</p>
+          </div>
         )}
 
-        {history.map((item, i) => (
-          <motion.div
-            key={item.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-            className="card-elevated p-4 flex items-center justify-between"
-          >
+        <div className="grid grid-cols-1 gap-4">
+          <AnimatePresence mode="popLayout">
+            {history.map((item, i) => {
+              const isPending = item.status === "pending_analysis";
+              
+              return (
+              <motion.div
+                key={item.id}
+                layout
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                transition={{ duration: 0.2 }}
+                className="card-elevated p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10"
+              >
             <div className="flex items-center gap-4">
               <div className="h-12 w-12 rounded-lg bg-primary/10 overflow-hidden flex-shrink-0 relative border border-border">
                 {item.overlay_url || item.image_url ? (
@@ -157,41 +174,75 @@ const HistoryPage = () => {
                 )}
               </div>
               <div>
-                <p className="text-sm font-medium text-foreground">{new Date(item.timestamp).toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground">
-                  {item.total_zones} zones · Healthy: {item.healthy_pct}% · Severe: {item.severe_pct}%
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">{new Date(item.timestamp).toLocaleString()}</p>
+                  {isPending && (
+                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20">PENDING</span>
+                  )}
+                </div>
+                {!isPending ? (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {item.total_zones} zones · Healthy: {item.healthy_pct}% · Severe: {item.severe_pct}%
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Drone ingestion complete. Waiting for analysis.
+                  </p>
+                )}
               </div>
             </div>
             
             <div className="flex items-center gap-3">
-              <button 
-                onClick={() => openReport(item.id)}
-                className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-              >
-                View Full Report
-              </button>
-
-              {i < history.length - 1 && (
-                <button 
+              {isPending ? (
+                 <button 
                   onClick={async () => {
-                     runAnalytics(history[i + 1].id, item.id);
-                     const tempWindow = window.open('about:blank', '_blank');
-                     const { data } = await supabase.auth.getSession();
-                     const token = data.session?.access_token || '';
-                     if (tempWindow) {
-                         tempWindow.location.href = cropSightApi.getComparisonReportUrl(history[i + 1].id, item.id, token);
+                     toast.loading("Analyzing drone frame...", { id: "analyze-toast" });
+                     try {
+                        const data = await cropSightApi.analyzeExistingScan(item.id);
+                        handleAnalysisComplete(data);
+                        toast.success("Analysis complete!", { id: "analyze-toast" });
+                     } catch (e) {
+                         toast.error("Failed to analyze scan.", { id: "analyze-toast" });
                      }
                   }}
-                  className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-                >
-                  <ArrowRightLeft className="w-4 h-4" />
-                  Detailed Comparison
-                </button>
+                  className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+                 >
+                   <Sprout className="w-4 h-4" />
+                   Analyze Frame
+                 </button>
+              ) : (
+                 <>
+                  <button 
+                    onClick={() => openReport(item.id)}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+                  >
+                    View Full Report
+                  </button>
+
+                  {i < history.length - 1 && (
+                    <button 
+                      onClick={async () => {
+                         runAnalytics(history[i + 1].id, item.id);
+                         const tempWindow = window.open('about:blank', '_blank');
+                         const { data } = await supabase.auth.getSession();
+                         const token = data.session?.access_token || '';
+                         if (tempWindow) {
+                             tempWindow.location.href = cropSightApi.getComparisonReportUrl(history[i + 1].id, item.id, token);
+                         }
+                      }}
+                      className="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+                    >
+                      <ArrowRightLeft className="w-4 h-4" />
+                      Detailed Comparison
+                    </button>
+                  )}
+                 </>
               )}
             </div>
           </motion.div>
-        ))}
+        )})}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );

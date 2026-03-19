@@ -8,6 +8,7 @@ import Signup from "./pages/Signup";
 import AppLayout from "./components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import UploadPage from "./pages/UploadPage";
+import DroneFeed from "./pages/DroneFeed";
 import HistoryPage from "./pages/HistoryPage";
 import NotFound from "./pages/NotFound";
 
@@ -25,6 +26,7 @@ const App = () => (
           <Route path="/signup" element={<Signup />} />
           <Route path="/dashboard" element={<AppLayout />}>
             <Route index element={<Dashboard />} />
+            <Route path="drone" element={<DroneFeed />} />
             <Route path="upload" element={<UploadPage />} />
             <Route path="history" element={<HistoryPage />} />
           </Route>
