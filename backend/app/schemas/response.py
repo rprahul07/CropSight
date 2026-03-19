@@ -8,6 +8,7 @@ class Zone(BaseModel):
     area: float
     issue: str
     recommendation: str
+    geo_coordinates: Optional[List[List[float]]] = None
 
 class Summary(BaseModel):
     healthy: float
@@ -16,12 +17,14 @@ class Summary(BaseModel):
     total_zones: int
 
 class GeoRef(BaseModel):
+    available: bool
     lat: Optional[float] = None
     lon: Optional[float] = None
-    status: str = "unavailable"
+    bounds: Optional[List[List[float]]] = None
 
 class AnalyzeResponse(BaseModel):
     status: str
+    scan_id: Optional[str] = None
     map: str  # base64_image
     geo: GeoRef
     summary: Summary

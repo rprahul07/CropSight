@@ -90,13 +90,16 @@ def extract_zones_and_overlay(final_index: np.ndarray, original_rgb: np.ndarray)
                 cx, cy = centroids[i]
                 zone_centroids.append({"id": zone_id, "cx": cx, "cy": cy, "score": health_score})
                 
+                contour_list = contours[0].tolist() if len(contours) > 0 else []
+                
                 zones.append({
                     "zone_id": zone_id,
                     "health_score": round(health_score, 2),
                     "severity": sev_level,
                     "area": float(area),
                     "issue": issue,
-                    "recommendation": recommendation
+                    "recommendation": recommendation,
+                    "contour": contour_list
                 })
                 zone_id += 1
                 

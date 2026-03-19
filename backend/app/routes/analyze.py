@@ -1,4 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header, BackgroundTasks
+from typing import Optional
 import cv2
 import numpy as np
 
@@ -9,12 +10,22 @@ from app.services.ndvi import calculate_vegetation_index
 from app.services.fusion import fuse_mask_and_index
 from app.services.postprocess import extract_zones_and_overlay
 from app.utils.image_utils import encode_image_base64
-from app.utils.geo_utils import extract_gps_info
+from app.services.geo_extractor import extract_gps
+from app.services.geo_mapper import create_bounds, convert_contour_to_geo
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 @router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_crop_image(file: UploadFile = File(...)):
+async def analyze_crop_image(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    field_id: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
+    authorization: Optional[str] = Header(None)
+):
     try:
         contents = await file.read()
         np_arr = np.frombuffer(contents, np.uint8)
@@ -24,8 +35,7 @@ async def analyze_crop_image(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Invalid image file")
             
         # Extract Geo metadata
-        geo_info = extract_gps_info(contents)
-        
+        gps_info = extract_gps(contents)
         # Preprocess
         prep_data = preprocess_image(image)
         
@@ -47,13 +57,108 @@ async def analyze_crop_image(file: UploadFile = File(...)):
         overlay_bgr = cv2.cvtColor(post_results["overlay_map"], cv2.COLOR_RGB2BGR)
         base64_img = encode_image_base64(overlay_bgr)
         
+        # Geo processing
+        geo_obj_dict = {"available": False}
+        zones_data = post_results["zones"]
+        
+        if gps_info:
+            logger.info("GPS detected: lat=%s, lon=%s", gps_info["lat"], gps_info["lon"])
+            bounds = create_bounds(gps_info["lat"], gps_info["lon"])
+            geo_obj_dict = {
+                "available": True,
+                "lat": gps_info["lat"],
+                "lon": gps_info["lon"],
+                "bounds": bounds
+            }
+            img_shape = prep_data["rgb"].shape
+            
+            geo_mapped_count = 0
+            for z in zones_data:
+                contour = z.pop("contour", [])
+                if contour:
+                    z["geo_coordinates"] = convert_contour_to_geo(contour, bounds, img_shape)
+                    geo_mapped_count += 1
+            logger.info("Geo mapping applied to %d zones", geo_mapped_count)
+        else:
+            logger.info("Geo unavailable – fallback to image-only mode")
+            for z in zones_data:
+                z.pop("contour", None)
+
         # Format response
         summary_obj = Summary(**post_results["summary"])
-        zones_obj = [Zone(**z) for z in post_results["zones"]]
-        geo_obj = GeoRef(**geo_info)
+        zones_obj = [Zone(**z) for z in zones_data]
+        geo_obj = GeoRef(**geo_obj_dict)
         
+        # Database & Cloud persistence side-effect
+        if field_id and user_id and authorization:
+            try:
+                from supabase import create_client, ClientOptions
+                from app.core.config import settings
+                from app.utils.s3_utils import upload_image_to_s3
+                
+                # Clone secure Supabase instance carrying user's live JWT auth
+                jwt_token = authorization.split(" ")[1] if " " in authorization else authorization
+                user_client = create_client(
+                    settings.SUPABASE_URL, 
+                    settings.SUPABASE_KEY, 
+                    options=ClientOptions(headers={"Authorization": f"Bearer {jwt_token}"})
+                )
+                
+                # Secure S3 Bucket Uploads
+                original_url = upload_image_to_s3(contents, folder="originals")
+                
+                _, buffer = cv2.imencode('.jpg', overlay_bgr)
+                overlay_url = upload_image_to_s3(buffer.tobytes(), folder="overlays")
+                
+                # Construct Scan ORM
+                scan_res = user_client.table("scans").insert({
+                    "field_id": field_id,
+                    "user_id": user_id,
+                    "image_url": original_url,
+                    "overlay_url": overlay_url,
+                    "healthy_pct": summary_obj.healthy,
+                    "moderate_pct": summary_obj.moderate,
+                    "severe_pct": summary_obj.severe,
+                    "total_zones": summary_obj.total_zones
+                }).execute()
+                
+                # Cascade into zone logs
+                if scan_res.data:
+                    scan_id = scan_res.data[0]["id"]
+                    db_zones = []
+                    for z in zones_data:
+                        db_zones.append({
+                            "scan_id": scan_id,
+                            "zone_index": z.get("zone_id"),
+                            "severity": z.get("severity"),
+                            "health_score": z.get("health_score"),
+                            "area": z.get("area"),
+                            "issue": z.get("issue"),
+                            "recommendation": z.get("recommendation"),
+                            "geo_coordinates": z.get("geo_coordinates", [])
+                        })
+                    if db_zones:
+                        user_client.table("zones").insert(db_zones).execute()
+                        logger.info("Successfully persisted Scan and %d Zones to Supabase", len(db_zones))
+                        
+                    # Queue the background report compiler
+                    from app.services.report_generator import generate_and_upload_report
+                    background_tasks.add_task(
+                        generate_and_upload_report,
+                        scan_id=scan_id,
+                        user_id=user_id,
+                        field_id=field_id,
+                        summary=post_results["summary"],
+                        zones=zones_data,
+                        user_client=user_client
+                    )
+
+            except Exception as db_err:
+                logger.error(f"Failed backend DB linkage: {db_err}")
+
         return AnalyzeResponse(
             status="success",
+            scan_id=scan_id if 'scan_id' in locals() else None,
             map=base64_img,
             geo=geo_obj,
             summary=summary_obj,
