@@ -47,9 +47,9 @@ def inject_gps(input_filename, output_filename, lat, lon):
 
 if __name__ == "__main__":
     print("CropSight Fake GPS Injector")
-    
-    input_file = "test_crop.jpg"
-    output_file = "geotagged_crop.jpg"
+
+    input_file = "PermanentCrop_90.jpg"
+    output_file = "geotagged_crop2.jpg"
     
     # Example coordinates: A random farming field in Iowa, USA
     latitude = 41.8780 

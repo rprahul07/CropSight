@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-def get_user_client(auth_header: str):
+def get_user_client(auth_header: Optional[str]):
     if not auth_header:
         from app.core.database import supabase
         return supabase
@@ -58,6 +58,40 @@ async def get_fields(user_id: str, authorization: Optional[str] = Header(None)):
         return {"fields": response.data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/stats")
+async def get_dashboard_stats(user_id: str, authorization: Optional[str] = Header(None)):
+    try:
+        user_client = get_user_client(authorization)
+        response = user_client.table("scans").select("*").eq("user_id", user_id).execute()
+        scans = response.data
+        
+        if not scans:
+            return {
+                "total_scans": 0,
+                "avg_healthy_pct": 0,
+                "avg_moderate_pct": 0,
+                "avg_severe_pct": 0,
+                "total_zones": 0
+            }
+            
+        total_scans = len(scans)
+        avg_healthy_pct = float(sum([s.get("healthy_pct", 0) for s in scans]) / total_scans)
+        avg_moderate_pct = float(sum([s.get("moderate_pct", 0) for s in scans]) / total_scans)
+        avg_severe_pct = float(sum([s.get("severe_pct", 0) for s in scans]) / total_scans)
+        total_zones = sum([s.get("total_zones", 0) for s in scans])
+        
+        return {
+            "total_scans": total_scans,
+            "avg_healthy_pct": round(avg_healthy_pct, 2),
+            "avg_moderate_pct": round(avg_moderate_pct, 2),
+            "avg_severe_pct": round(avg_severe_pct, 2),
+            "total_zones": total_zones
+        }
+    except Exception as e:
+        logger.error(f"Error fetching stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/fields/{field_id}/scans")
 async def get_field_scans(field_id: str, authorization: Optional[str] = Header(None)):

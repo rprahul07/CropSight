@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import analyze, time_series
+from app.routes import analyze, time_series, ingest
 
 app = FastAPI(
     title="CropSight API",
@@ -18,6 +18,7 @@ app.add_middleware(
 
 app.include_router(analyze.router, prefix="", tags=["Analysis"])
 app.include_router(time_series.router, prefix="/api", tags=["Time Series Data"])
+app.include_router(ingest.router, prefix="", tags=["Drone Ingestion Pipeline"])
 
 @app.get("/health")
 async def health_check():
